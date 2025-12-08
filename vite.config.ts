@@ -12,8 +12,9 @@ export default defineConfig({
       name: "host-dec",
       remotes: {
         remoteApp: "https://remote-atena.vercel.app/assets/remoteEntry.js",
+        remoteReactStreamlit: "http://localhost:5001/assets/remoteEntry.js", // o la URL que uses
       },
-      shared: ["react", "react-dom"],
+      shared: ["react", "react-dom", "react-router-dom"], // 👈 CAMBIO
     }),
   ],
   build: {
