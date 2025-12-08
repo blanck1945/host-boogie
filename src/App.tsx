@@ -1,58 +1,27 @@
-import { Link } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import axios from "axios";
 import type { Application } from "./types/Application";
 import { ApplicationCard } from "./components/ApplicationCard";
-import { useEffect, useState } from "react";
+import { useYourIdAuth } from "./sdk/useYourIDAuth";
 
 function App() {
-  const [isAuthChecked, setIsAuthChecked] = useState(false);
-  const [authError, setAuthError] = useState<string | null>(null);
+  // 1) Usamos el SDK
+  const { user, isChecking, authError } = useYourIdAuth({
+    applicationBaseUrl: import.meta.env.VITE_APPLICATION_MICROSERVICE_URL,
+    yourIdLoginUrl: import.meta.env.VITE_YOUR_ID_LOGIN_URL,
+    env: import.meta.env.VITE_ENV, // "dev" | "prod"
+  });
 
-  // Este useEffect controla la lógica de chequeo de autenticación inicial
-  useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        await axios.get("http://localhost:3000/user/me", {
-          withCredentials: true,
-        });
-        setIsAuthChecked(true);
-      } catch (err: any) {
-        if (err.response && err.response.status === 401) {
-          // Si devuelve 401, hacer el login en el puerto 4001
-          try {
-            await axios.get("http://localhost:4001/login", {
-              withCredentials: true,
-            });
-            setIsAuthChecked(true);
-          } catch (loginErr: any) {
-            setAuthError(
-              loginErr?.response?.data?.message ||
-                loginErr?.message ||
-                "Error al hacer login"
-            );
-          }
-        } else {
-          setAuthError(
-            err?.response?.data?.message ||
-              err?.message ||
-              "Error desconocido de autenticación"
-          );
-        }
-      }
-    };
-
-    checkAuth();
-  }, []);
-
+  // 2) Cargar aplicaciones SOLO cuando el usuario está autenticado
   const { data, isLoading, error } = useQuery({
     queryKey: ["applications"],
-    enabled: isAuthChecked && !authError, // Solo correr si la autenticación está ok
+    enabled: !!user && !authError,
     queryFn: async () => {
-      const res = await axios.get("http://localhost:3000/applications", {
-        withCredentials: true,
-      });
-      return res.data; // ← debería devolver un array de Application[]
+      const res = await axios.get(
+        `${import.meta.env.VITE_APPLICATION_MICROSERVICE_URL}/applications`,
+        { withCredentials: true }
+      );
+      return res.data as Application[];
     },
   });
 
@@ -61,22 +30,30 @@ function App() {
       <div className="flex p-6 justify-between items-center bg-slate-700 text-white">
         <h1>Host</h1>
         <p>Host is a platform for hosting decentralized applications.</p>
-        <div className="flex gap-2">
-          <Link to="/remote">Remote App</Link>
-        </div>
+
+        {user && (
+          <div className="flex gap-2">
+            <span className="text-sm">
+              Hi <span className="font-semibold">{user.username}</span>
+            </span>
+          </div>
+        )}
       </div>
 
       <div className="p-6">
-        {!isAuthChecked && !authError && <p>Verificando autenticación...</p>}
+        {/* Auth status */}
+        {isChecking && <p>Verificando autenticación...</p>}
         {authError && (
           <p className="text-red-500">Error de autenticación: {authError}</p>
         )}
-        {isAuthChecked && isLoading && <p>Cargando aplicaciones...</p>}
-        {isAuthChecked && error && (
+
+        {/* App listing */}
+        {user && isLoading && <p>Cargando aplicaciones...</p>}
+        {user && error && (
           <p className="text-red-500">Error: {(error as Error).message}</p>
         )}
 
-        {isAuthChecked && data && (
+        {user && data && (
           <ul
             className="
               grid 
@@ -85,7 +62,7 @@ function App() {
               md:grid-cols-3
               lg:grid-cols-4 
               gap-6
-              "
+            "
           >
             {data.map((app: Application) => (
               <li key={app.id}>

@@ -18,7 +18,7 @@ const router = createBrowserRouter([
     element: <App />,
   },
   {
-    path: "/pandora",
+    path: "/atena",
     element: <RemoteApp />,
   },
 ]);

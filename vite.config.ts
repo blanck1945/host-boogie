@@ -11,7 +11,7 @@ export default defineConfig({
     federation({
       name: "host-dec",
       remotes: {
-        remoteApp: "http://localhost:5001/assets/remoteEntry.js",
+        remoteApp: "https://remote-atena.vercel.app/assets/remoteEntry.js",
       },
       shared: ["react", "react-dom"],
     }),
