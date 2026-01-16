@@ -3,6 +3,7 @@ import axios from "axios";
 export interface YourIdUser {
   username: string;
   email: string;
+  rol?: string;
 }
 
 export interface YourIdConfig {
@@ -11,7 +12,7 @@ export interface YourIdConfig {
   env: "dev" | "prod"; // VITE_ENV
 }
 
-/**
+/**+
  * Verifica autenticación contra /user/me.
  * - Si está autenticado, devuelve el user.
  * - Si responde 401, redirige al login de YourID y nunca resuelve.
