@@ -35,6 +35,12 @@ function App() {
           <div className="flex gap-2">
             <span className="text-sm">
               Hi <span className="font-semibold">{user.username}</span>
+              {user.rol && (
+                <>
+                  {" | "}
+                  <span className="font-semibold">{user.rol}</span>
+                </>
+              )}
             </span>
           </div>
         )}
@@ -72,7 +78,7 @@ function App() {
       </div>
 
       <footer className="mt-auto bg-slate-800 text-white text-center py-4">
-        <p>&copy; {new Date().getFullYear()} Host Dec. All rights reserved.</p>
+        <p>&copy; {new Date().getFullYear()} Host. All rights reserved.</p>
       </footer>
     </div>
   );
