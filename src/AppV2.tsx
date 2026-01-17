@@ -12,6 +12,7 @@ import {
 import type { Application } from "./types/Application";
 import { ApplicationCard } from "./components/ApplicationCard";
 import { useYourIdAuth } from "./sdk/useYourIDAuth";
+import { getAuthHeaders } from "./sdk/yourid-sdk";
 
 // Error Boundary para manejar errores en componentes remotos
 class ErrorBoundary extends Component<
@@ -114,7 +115,9 @@ function AppV2() {
     queryFn: async () => {
       const res = await axios.get(
         `${import.meta.env.VITE_APPLICATION_MICROSERVICE_URL}/applications`,
-        { withCredentials: true }
+        {
+          headers: getAuthHeaders(),
+        }
       );
       return res.data as Application[];
     },

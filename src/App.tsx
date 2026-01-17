@@ -3,6 +3,7 @@ import axios from "axios";
 import type { Application } from "./types/Application";
 import { ApplicationCard } from "./components/ApplicationCard";
 import { useYourIdAuth } from "./sdk/useYourIDAuth";
+import { getAuthHeaders } from "./sdk/yourid-sdk";
 
 function App() {
   // 1) Usamos el SDK
@@ -19,7 +20,9 @@ function App() {
     queryFn: async () => {
       const res = await axios.get(
         `${import.meta.env.VITE_APPLICATION_MICROSERVICE_URL}/applications`,
-        { withCredentials: true }
+        {
+          headers: getAuthHeaders(),
+        }
       );
       return res.data as Application[];
     },
