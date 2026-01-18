@@ -27,16 +27,16 @@ const router = createBrowserRouter([
     element: <AppV2 />,
   },
   {
-    path: "/atena",
-    element: <RemoteApp />,
+    path: "/atena/*",
+    element: <AppV2 />,
   },
   {
     path: "/blizzard/*", // opcionalmente con wildcard
-    element: <RemoteStreamlitApp />,
+    element: <AppV2 />,
   },
   {
     path: "/blizzard-admin",
-    element: <RemoteInformationApp />,
+    element: <AppV2 />,
   },
 ]);
 

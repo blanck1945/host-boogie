@@ -8,7 +8,20 @@ import {
   Component,
   type ReactNode,
   useEffect,
+  useMemo,
 } from "react";
+
+// Pre-importar los componentes remotos para que Vite los reconozca en tiempo de compilación
+// @ts-expect-error RemoteApp is not defined
+const RemoteAppLazy = lazy(() => import("remoteApp/App"));
+// @ts-expect-error RemoteReactStreamlit is not defined
+const RemoteReactStreamlitLazy = lazy(() => import("remoteReactStreamlit/routes"));
+// @ts-expect-error RemoteInformation is not defined
+const RemoteInformationLazy = lazy(() => import("remoteInformation/App"));
+import {
+  useNavigate,
+  useLocation,
+} from "react-router-dom";
 import type { Application } from "./types/Application";
 import { ApplicationCard } from "./components/ApplicationCard";
 import { useYourIdAuth } from "./sdk/useYourIDAuth";
@@ -52,32 +65,65 @@ class ErrorBoundary extends Component<
   }
 }
 
-// Componentes lazy para remotes de Module Federation
-const RemoteSeedApp = lazy(async () => {
-  try {
-    // @ts-expect-error - Module Federation remote
-    const module = await import("remoteApp/App");
-    // Asegurarse de que el módulo tenga un default export
-    if (module.default) {
-      return module;
-    }
-    // Si no hay default, intentar usar el export nombrado App
-    if (module.App) {
-      return { default: module.App };
-    }
-    throw new Error("No se encontró un componente válido en remote-seed/App");
-  } catch (err) {
-    console.error("Error loading remote-seed/App:", err);
-    // To prevent breaking Suspense, return a dummy module
-    return { default: () => <div>Error loading remote app.</div> };
-  }
-});
-
-// Mapeo de remotes de Module Federation por URL
-const remoteComponents: Record<string, ComponentType<Record<string, never>>> = {
-  "/atena": RemoteSeedApp,
-  // Agregar más remotes aquí según sea necesario
+// Mapeo de remote names a componentes lazy pre-importados
+const remoteComponentMap: Record<string, ComponentType<Record<string, never>>> = {
+  "remoteApp/App": RemoteAppLazy,
+  "remoteReactStreamlit/routes": RemoteReactStreamlitLazy,
+  "remoteInformation/App": RemoteInformationLazy,
 };
+
+// Función helper para obtener el componente lazy pre-importado
+function getRemoteComponent(remoteName: string): ComponentType<Record<string, never>> | undefined {
+  console.log(`[getRemoteComponent] Buscando componente para: ${remoteName}`);
+  const component = remoteComponentMap[remoteName];
+  if (component) {
+    console.log(`[getRemoteComponent] Componente encontrado: ${remoteName}`);
+    return component;
+  }
+  console.warn(`[getRemoteComponent] Componente no encontrado para: ${remoteName}. Componentes disponibles:`, Object.keys(remoteComponentMap));
+  return undefined;
+}
+
+// Mapeo de URLs de aplicación a nombres de remotes de Module Federation
+// Este mapeo se basa en los remotes configurados en vite.config.ts
+const urlToRemoteMap: Record<string, { remoteName: string; exportName?: string }> = {
+  "/atena": { remoteName: "remoteApp/App" },
+  "/blizzard": { remoteName: "remoteReactStreamlit/routes" },
+  "/blizzard-admin": { remoteName: "remoteInformation/App" },
+  // Agregar más mapeos aquí según sea necesario
+};
+
+// Función para determinar si una URL es un remote de Module Federation
+function isModuleFederationRemote(url: string): boolean {
+  // Verificar si la URL está en el mapeo
+  if (urlToRemoteMap[url]) {
+    return true;
+  }
+  
+  // Verificar si la URL comienza con alguno de los paths mapeados
+  return Object.keys(urlToRemoteMap).some(mappedUrl => url.startsWith(mappedUrl));
+}
+
+// Función para obtener el remote name desde la URL
+function getRemoteNameFromUrl(url: string): { remoteName: string; exportName?: string } | null {
+  // Buscar coincidencia exacta primero
+  if (urlToRemoteMap[url]) {
+    return urlToRemoteMap[url];
+  }
+  
+  // Buscar coincidencia por prefijo
+  for (const [mappedUrl, config] of Object.entries(urlToRemoteMap)) {
+    if (url.startsWith(mappedUrl)) {
+      return config;
+    }
+  }
+  
+  return null;
+}
+
+// Cache de componentes lazy cargados dinámicamente
+const remoteComponentCache = new Map<string, ComponentType<Record<string, never>>>();
+
 
 // Función para extraer iniciales del nombre de la aplicación
 function getAppInitials(appName: string): string {
@@ -100,6 +146,458 @@ function getAppInitials(appName: string): string {
   }
 }
 
+// Componente wrapper para renderizar remotes de MF
+function RemoteAppRenderer({ app }: { app: Application }) {
+  const appUrl = app.url || "";
+  const location = useLocation();
+  const navigate = useNavigate();
+  
+  console.log('RemoteAppRenderer - appUrl:', appUrl, 'app:', app);
+  console.log('RemoteAppRenderer - current location:', location.pathname);
+  
+  // Interceptar navegaciones de la aplicación remota cuando usa rutas absolutas
+  useEffect(() => {
+    // Lista de rutas conocidas de la aplicación remota (ajustar según sea necesario)
+    const remoteRoutes = ['/stats', '/dashboard', '/settings']; // Agregar más según sea necesario
+    
+    const currentPath = location.pathname;
+    console.log('RemoteAppRenderer - Checking navigation, current path:', currentPath, 'appUrl:', appUrl);
+    
+    // Si la ruta actual es una ruta absoluta que la app remota podría estar usando
+    // y no comienza con appUrl, redirigirla al contexto correcto
+    const isRemoteRoute = remoteRoutes.some(route => 
+      currentPath === route || currentPath === route + '/' || currentPath.startsWith(route + '/')
+    );
+    
+    if (isRemoteRoute && !currentPath.startsWith(appUrl) && currentPath !== '/v2' && !currentPath.startsWith('/v2/')) {
+      const newPath = `${appUrl}${currentPath}`;
+      console.log('RemoteAppRenderer - Interceptando navegación absoluta, redirigiendo a:', newPath);
+      navigate(newPath, { replace: true });
+    }
+  }, [appUrl, navigate, location.pathname]);
+  
+  // Verificar si es un remote de Module Federation
+  const isRemote = isModuleFederationRemote(appUrl);
+  console.log('RemoteAppRenderer - isModuleFederationRemote:', isRemote);
+  
+  // Obtener la configuración del remote desde la URL (siempre calcular, incluso si no es remote)
+  const remoteConfig = getRemoteNameFromUrl(appUrl);
+  console.log('RemoteAppRenderer - remoteConfig:', remoteConfig);
+  
+  // Obtener el componente lazy pre-importado usando useMemo
+  const RemoteComponent = useMemo(() => {
+    if (!isRemote || !remoteConfig) {
+      return undefined;
+    }
+    
+    const cacheKey = `${remoteConfig.remoteName}:${remoteConfig.exportName || "default"}`;
+    console.log('RemoteAppRenderer - cacheKey:', cacheKey);
+    
+    // Intentar obtener del cache primero
+    let component = remoteComponentCache.get(cacheKey);
+    if (component) {
+      console.log('RemoteAppRenderer - Usando componente del cache:', cacheKey);
+      return component;
+    }
+    
+    // Si no está en el cache, obtener del mapeo de componentes pre-importados
+    component = getRemoteComponent(remoteConfig.remoteName);
+    if (component) {
+      console.log('RemoteAppRenderer - Usando componente pre-importado:', remoteConfig.remoteName);
+      remoteComponentCache.set(cacheKey, component);
+      return component;
+    }
+    
+    console.error('RemoteAppRenderer - No se encontró componente para:', remoteConfig.remoteName);
+    return undefined;
+  }, [isRemote, remoteConfig]);
+  
+  // Si no es un remote de MF, mostrar en iframe
+  if (!isRemote) {
+    console.log('RemoteAppRenderer - Mostrando en iframe (no es remote MF)');
+    return (
+      <iframe
+        src={appUrl}
+        className="w-full h-full border-0"
+        title={app.appName || "Aplicación"}
+        sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals"
+      />
+    );
+  }
+  
+  if (!remoteConfig) {
+    // Fallback a iframe si no se encuentra la configuración
+    console.log('RemoteAppRenderer - Fallback a iframe (no se encontró remoteConfig)');
+    return (
+      <iframe
+        src={appUrl}
+        className="w-full h-full border-0"
+        title={app.appName || "Aplicación"}
+        sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals"
+      />
+    );
+  }
+  
+  if (!RemoteComponent) {
+    console.log('RemoteAppRenderer - No se pudo crear el componente remoto');
+    return (
+      <div className="flex items-center justify-center h-full bg-slate-50">
+        <div className="text-center">
+          <p className="text-slate-600 text-lg">
+            Error: No se pudo cargar la aplicación
+          </p>
+        </div>
+      </div>
+    );
+  }
+  
+  console.log('RemoteAppRenderer - Renderizando componente remoto');
+  
+  return (
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center h-full bg-slate-50">
+          <div className="text-center">
+            <p className="text-slate-600 text-lg">
+              Cargando aplicación...
+            </p>
+          </div>
+        </div>
+      }
+    >
+      <div className="w-full h-full overflow-auto">
+        <ErrorBoundary>
+          <RemoteComponent />
+        </ErrorBoundary>
+      </div>
+    </Suspense>
+  );
+}
+
+// Componente para mostrar una aplicación individual
+function AppViewer({ 
+  app, 
+  onBack 
+}: { 
+  app: Application;
+  onBack?: () => void;
+}) {
+  const navigate = useNavigate();
+
+  return (
+    <div className="flex-1 flex flex-col h-full">
+      {/* Barra superior con información de la app */}
+      <div className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between shadow-sm">
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => {
+              onBack?.();
+              navigate("/v2", { replace: true });
+            }}
+            className="text-slate-600 hover:text-slate-800 flex items-center gap-2 transition-colors"
+          >
+            <svg
+              className="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M10 19l-7-7m0 0l7-7m-7 7h18"
+              />
+            </svg>
+            Volver
+          </button>
+          <div className="h-6 w-px bg-slate-300" />
+          <div>
+            <h2 className="text-lg font-semibold text-slate-800">
+              {app.appName}
+              {app.description && (
+                <>
+                  {" | "}
+                  <span className="font-normal text-slate-600">
+                    {app.description}
+                  </span>
+                </>
+              )}
+            </h2>
+          </div>
+        </div>
+        <span
+          className={`
+            px-3
+            py-1
+            rounded-full
+            text-xs
+            font-semibold
+            ${
+              app.isActive
+                ? "bg-green-100 text-green-700 border border-green-300"
+                : "bg-red-100 text-red-700 border border-red-300"
+            }
+          `}
+        >
+          {app.isActive ? "Activo" : "Inactivo"}
+        </span>
+      </div>
+
+      {/* Contenedor para la aplicación */}
+      <div className="flex-1 relative">
+        {app.isActive ? (
+          <RemoteAppRenderer app={app} />
+        ) : (
+          <div className="flex items-center justify-center h-full bg-slate-50">
+            <div className="text-center">
+              <p className="text-slate-600 text-lg mb-2">
+                Esta aplicación está inactiva
+              </p>
+              <p className="text-slate-500 text-sm">
+                No se puede mostrar en este momento
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Componente para la vista de inicio (lista de aplicaciones)
+function HomeView({ 
+  applications, 
+  onAppSelect 
+}: { 
+  applications: Application[];
+  onAppSelect?: (app: Application) => void;
+}) {
+  const [sortBy, setSortBy] = useState<'id' | 'name' | 'createdAt'>('id');
+
+  return (
+    <div className="p-6 overflow-y-auto h-full">
+      {/* Página de bienvenida por defecto */}
+      <div className="max-w-4xl mx-auto">
+        <div className="text-center mb-12">
+          <h1 className="text-5xl font-bold text-slate-800 mb-4">
+            Bienvenido a{" "}
+            <span className="text-slate-700">Host</span>
+          </h1>
+          <p className="text-xl text-slate-600 mb-8">
+            Tu plataforma centralizada para aplicaciones
+            descentralizadas
+          </p>
+        </div>
+
+        {/* Pitch de ventas */}
+        <div className="bg-gradient-to-br from-white to-slate-50 rounded-2xl shadow-xl p-8 mb-8 border border-slate-200">
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-2xl font-bold text-slate-800 mb-3">
+                ¿Qué es Host?
+              </h2>
+              <p className="text-slate-600 leading-relaxed">
+                Host es una plataforma innovadora diseñada para
+                alojar y gestionar aplicaciones descentralizadas de
+                manera eficiente y segura. Simplificamos el acceso a
+                múltiples aplicaciones desde un único punto de
+                entrada, proporcionando una experiencia de usuario
+                fluida y unificada.
+              </p>
+            </div>
+
+            <div className="grid md:grid-cols-3 gap-6 mt-8">
+              <div className="bg-white p-6 rounded-xl shadow-md border border-slate-100">
+                <div className="w-12 h-12 bg-slate-700 rounded-lg flex items-center justify-center mb-4">
+                  <svg
+                    className="w-6 h-6 text-white"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+                    />
+                  </svg>
+                </div>
+                <h3 className="text-lg font-semibold text-slate-800 mb-2">
+                  Seguro y Confiable
+                </h3>
+                <p className="text-slate-600 text-sm">
+                  Autenticación robusta y gestión centralizada de
+                  aplicaciones con máxima seguridad.
+                </p>
+              </div>
+
+              <div className="bg-white p-6 rounded-xl shadow-md border border-slate-100">
+                <div className="w-12 h-12 bg-slate-700 rounded-lg flex items-center justify-center mb-4">
+                  <svg
+                    className="w-6 h-6 text-white"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z"
+                    />
+                  </svg>
+                </div>
+                <h3 className="text-lg font-semibold text-slate-800 mb-2">
+                  Acceso Unificado
+                </h3>
+                <p className="text-slate-600 text-sm">
+                  Todas tus aplicaciones en un solo lugar. Navega
+                  entre ellas sin complicaciones.
+                </p>
+              </div>
+
+              <div className="bg-white p-6 rounded-xl shadow-md border border-slate-100">
+                <div className="w-12 h-12 bg-slate-700 rounded-lg flex items-center justify-center mb-4">
+                  <svg
+                    className="w-6 h-6 text-white"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M13 10V3L4 14h7v7l9-11h-7z"
+                    />
+                  </svg>
+                </div>
+                <h3 className="text-lg font-semibold text-slate-800 mb-2">
+                  Rápido y Eficiente
+                </h3>
+                <p className="text-slate-600 text-sm">
+                  Carga instantánea de aplicaciones con tecnología
+                  de Module Federation.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-8 pt-6 border-t border-slate-200">
+              <h3 className="text-xl font-semibold text-slate-800 mb-3">
+                ¿Cómo funciona?
+              </h3>
+              <ol className="list-decimal list-inside space-y-2 text-slate-600">
+                <li>
+                  <strong className="text-slate-800">
+                    Explora
+                  </strong>{" "}
+                  las aplicaciones disponibles en el menú lateral
+                </li>
+                <li>
+                  <strong className="text-slate-800">
+                    Selecciona
+                  </strong>{" "}
+                  la aplicación que deseas usar
+                </li>
+                <li>
+                  <strong className="text-slate-800">
+                    Disfruta
+                  </strong>{" "}
+                  de una experiencia fluida e integrada
+                </li>
+              </ol>
+            </div>
+          </div>
+        </div>
+
+        {/* Lista de aplicaciones */}
+        {applications && (
+          <div>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+              <h2 className="text-2xl font-bold text-slate-800">
+                Aplicaciones Disponibles
+                {applications.length > 0 && (
+                  <span className="ml-2 text-lg font-normal text-slate-500">
+                    ({applications.length})
+                  </span>
+                )}
+              </h2>
+              <div className="flex items-center gap-3">
+                <label
+                  htmlFor="sort-select-main"
+                  className="text-sm font-medium text-slate-700 whitespace-nowrap"
+                >
+                  Ordenar por:
+                </label>
+                <select
+                  id="sort-select-main"
+                  value={sortBy}
+                  onChange={(e) =>
+                    setSortBy(
+                      e.target.value as 'id' | 'name' | 'createdAt'
+                    )
+                  }
+                  className="
+                    px-4
+                    py-2
+                    bg-white
+                    text-slate-800
+                    border
+                    border-slate-300
+                    rounded-lg
+                    text-sm
+                    font-medium
+                    focus:outline-none
+                    focus:ring-2
+                    focus:ring-blue-500
+                    focus:border-blue-500
+                    hover:border-slate-400
+                    transition-colors
+                    shadow-sm
+                    min-w-[180px]
+                  "
+                >
+                  <option value="id">ID (por defecto)</option>
+                  <option value="name">Nombre</option>
+                  <option value="createdAt">Fecha de creación</option>
+                </select>
+              </div>
+            </div>
+            {applications.length > 0 ? (
+              <ul
+                className="
+                  grid 
+                  grid-cols-1
+                  md:grid-cols-2
+                  lg:grid-cols-3
+                  gap-6
+                "
+              >
+                {applications.map((app: Application) => (
+                  <li key={app.id}>
+                    <ApplicationCard
+                      application={app}
+                      onClick={() => onAppSelect?.(app)}
+                    />
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="text-center py-12">
+                <p className="text-slate-600 text-lg">
+                  No hay aplicaciones disponibles
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function AppV2() {
   // 1) Usamos el SDK
   const { user, isChecking, authError } = useYourIdAuth({
@@ -108,35 +606,109 @@ function AppV2() {
     env: import.meta.env.VITE_ENV, // "dev" | "prod"
   });
 
+  // Estados
+  const [isSidebarExpanded, setIsSidebarExpanded] = useState(true);
+  const [sortBy, setSortBy] = useState<'id' | 'name' | 'createdAt'>('id');
+  const [selectedApp, setSelectedApp] = useState<Application | null>(null);
+  const location = useLocation();
+  const navigate = useNavigate();
+
   // 2) Cargar aplicaciones SOLO cuando el usuario está autenticado
   const { data, isLoading, error } = useQuery({
-    queryKey: ["applications"],
+    queryKey: ["applications", sortBy],
     enabled: !!user && !authError,
     queryFn: async () => {
-      const res = await axios.get(
-        `${import.meta.env.VITE_APPLICATION_MICROSERVICE_URL}/applications`,
-        {
-          headers: getAuthHeaders(),
-        }
-      );
+      const url = `${import.meta.env.VITE_APPLICATION_MICROSERVICE_URL}/applications`;
+      console.log('Fetching applications with sortBy:', sortBy, 'from:', url);
+      const res = await axios.get(url, {
+        headers: getAuthHeaders(),
+        params: {
+          sortBy: sortBy,
+        },
+      });
+      console.log('Applications received:', res.data?.length || 0, 'apps');
       return res.data as Application[];
     },
   });
 
-  const [selectedApp, setSelectedApp] = useState<Application | null>(null);
-  const [isSidebarExpanded, setIsSidebarExpanded] = useState(true);
-
-  // Detectar si la app es un remote de Module Federation
-  const RemoteComponent = selectedApp
-    ? remoteComponents[selectedApp.url]
-    : null;
-  const isRemoteApp = RemoteComponent !== undefined;
-
+  // Sincronizar selectedApp con la ruta actual
   useEffect(() => {
-    if (selectedApp) {
-      console.log("selectedApp", selectedApp);
+    if (!data) return;
+
+    const currentPath = location.pathname;
+    
+    // Si estamos en /v2, mostrar home
+    if (currentPath === '/v2' || currentPath === '/v2/') {
+      setSelectedApp(null);
+      return;
     }
-  }, [selectedApp]);
+
+    // Buscar aplicación por ID en la ruta /v2/app/:id (fallback para compatibilidad)
+    const pathParts = currentPath.split('/');
+    const appIdIndex = pathParts.indexOf('app');
+    if (appIdIndex !== -1 && appIdIndex < pathParts.length - 1 && currentPath.startsWith('/v2/app/')) {
+      const appIdStr = pathParts[appIdIndex + 1];
+      // Intentar buscar por ID numérico o string
+      const app = data.find(a => String(a.id) === appIdStr || a.id === parseInt(appIdStr));
+      if (app && app.id !== selectedApp?.id) {
+        setSelectedApp(app);
+      }
+      return;
+    }
+
+    // Buscar aplicación por URL (para rutas como /blizzard, /atena, /blizzard-admin, etc.)
+    // Normalizar la ruta para comparar (remover trailing slash y wildcards)
+    const normalizedPath = currentPath.replace(/\/$/, '').split('/*')[0];
+    
+    // Buscar aplicación que coincida con la URL
+    // Primero buscar coincidencia exacta
+    let app = data.find(a => {
+      const appUrl = a.url || '';
+      return appUrl === normalizedPath || appUrl === currentPath;
+    });
+
+    // Si no hay coincidencia exacta, buscar por prefijo (para rutas anidadas como /atena/stats)
+    if (!app) {
+      app = data.find(a => {
+        const appUrl = a.url || '';
+        // Verificar si la ruta actual comienza con la URL de la app (para rutas anidadas)
+        // o si la URL de la app está en el mapeo de remotes
+        const pathMatches = currentPath.startsWith(appUrl + '/') || currentPath === appUrl;
+        const normalizedMatches = normalizedPath.startsWith(appUrl + '/') || normalizedPath === appUrl;
+        const remoteMapMatches = urlToRemoteMap[appUrl] && (currentPath.startsWith(appUrl + '/') || currentPath === appUrl);
+        
+        return pathMatches || normalizedMatches || remoteMapMatches;
+      });
+    }
+
+    // Si aún no encontramos, buscar en el mapeo de remotes por la ruta
+    if (!app) {
+      const remoteConfig = urlToRemoteMap[normalizedPath] || urlToRemoteMap[currentPath];
+      if (remoteConfig) {
+        // Buscar aplicación que tenga una URL que coincida con algún remote mapeado
+        app = data.find(a => {
+          const appUrl = a.url || '';
+          return urlToRemoteMap[appUrl]?.remoteName === remoteConfig.remoteName;
+        });
+      }
+    }
+
+    if (app && app.id !== selectedApp?.id) {
+      setSelectedApp(app);
+    } else if (!app && selectedApp && currentPath !== '/v2' && !currentPath.startsWith('/v2/')) {
+      // Si no encontramos app pero hay una seleccionada y no estamos en /v2
+      // Verificar si la ruta actual es una ruta anidada de la app seleccionada
+      const selectedAppUrl = selectedApp.url || '';
+      const isNestedRoute = currentPath.startsWith(selectedAppUrl + '/') || currentPath === selectedAppUrl;
+      
+      if (!isNestedRoute && 
+          selectedAppUrl !== normalizedPath && 
+          selectedAppUrl !== currentPath) {
+        // Solo limpiar si realmente cambió la ruta y no es una ruta anidada
+        setSelectedApp(null);
+      }
+    }
+  }, [location.pathname, data]);
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50">
@@ -207,6 +779,55 @@ function AppV2() {
               </button>
             </div>
 
+            {/* Selector de ordenamiento */}
+            {isSidebarExpanded && user && (
+              <div className="mb-4 p-3 bg-zinc-800 rounded-lg border border-zinc-600">
+                <label
+                  htmlFor="sort-select"
+                  className="block text-xs font-semibold text-zinc-200 mb-2"
+                >
+                  Ordenar por:
+                </label>
+                <select
+                  id="sort-select"
+                  value={sortBy}
+                  onChange={(e) => {
+                    const newSort = e.target.value as 'id' | 'name' | 'createdAt';
+                    console.log('Sort changed to:', newSort);
+                    setSortBy(newSort);
+                  }}
+                  className="
+                    w-full
+                    px-3
+                    py-2
+                    bg-zinc-900
+                    text-white
+                    border
+                    border-zinc-500
+                    rounded-lg
+                    text-sm
+                    font-medium
+                    focus:outline-none
+                    focus:ring-2
+                    focus:ring-blue-500
+                    focus:border-blue-500
+                    hover:bg-zinc-700
+                    transition-colors
+                    cursor-pointer
+                  "
+                >
+                  <option value="id">ID (por defecto)</option>
+                  <option value="name">Nombre</option>
+                  <option value="createdAt">Fecha de creación</option>
+                </select>
+                {data && (
+                  <p className="text-xs text-zinc-400 mt-2">
+                    {data.length} aplicación{data.length !== 1 ? 'es' : ''}
+                  </p>
+                )}
+              </div>
+            )}
+
             {/* Auth status en sidebar */}
             {isChecking && (
               <p
@@ -249,31 +870,38 @@ function AppV2() {
 
             {user && data && (
               <nav className="space-y-2">
-                {data.map((app: Application) => (
-                  <button
-                    key={app.id}
-                    onClick={() => setSelectedApp(app)}
-                    className={`
-                      w-full
-                      text-left
-                      ${isSidebarExpanded ? "p-3" : "p-2"}
-                      rounded-lg
-                      transition-all
-                      duration-200
-                      flex
-                      items-center
-                      cursor-pointer
-                      ${isSidebarExpanded ? "gap-3" : "justify-center"}
-                      ${
-                        isSidebarExpanded
-                          ? selectedApp?.id === app.id
-                            ? "bg-zinc-600 text-white shadow-md"
-                            : "bg-zinc-800 text-zinc-200 hover:bg-zinc-600"
-                          : "bg-transparent hover:bg-zinc-700/50"
-                      }
-                    `}
-                    title={!isSidebarExpanded ? app.appName : undefined}
-                  >
+                {data.map((app: Application) => {
+                  const isActive = selectedApp?.id === app.id;
+                  
+                  return (
+                    <button
+                      key={app.id}
+                      onClick={() => {
+                        setSelectedApp(app);
+                        const appUrl = app.url || `/v2/app/${app.id}`;
+                        navigate(appUrl, { replace: true });
+                      }}
+                      className={`
+                        w-full
+                        text-left
+                        ${isSidebarExpanded ? "p-3" : "p-2"}
+                        rounded-lg
+                        transition-all
+                        duration-200
+                        flex
+                        items-center
+                        cursor-pointer
+                        ${isSidebarExpanded ? "gap-3" : "justify-center"}
+                        ${
+                          isSidebarExpanded
+                            ? isActive
+                              ? "bg-zinc-600 text-white shadow-md"
+                              : "bg-zinc-800 text-zinc-200 hover:bg-zinc-600"
+                            : "bg-transparent hover:bg-zinc-700/50"
+                        }
+                      `}
+                      title={!isSidebarExpanded ? app.appName : undefined}
+                    >
                     {/* Contenedor circular con iniciales - siempre visible */}
                     <div
                       className={`
@@ -286,11 +914,7 @@ function AppV2() {
                         justify-center
                         transition-all
                         duration-200
-                        ${
-                          selectedApp?.id === app.id
-                            ? "bg-blue-500 hover:bg-blue-400"
-                            : "bg-blue-600 hover:bg-blue-500"
-                        }
+                        bg-blue-600 hover:bg-blue-500
                       `}
                     >
                       <span
@@ -318,8 +942,9 @@ function AppV2() {
                         )}
                       </div>
                     )}
-                  </button>
-                ))}
+                    </button>
+                  );
+                })}
               </nav>
             )}
           </div>
@@ -327,283 +952,29 @@ function AppV2() {
 
         {/* Container central para mostrar las apps */}
         <main className="flex-1 overflow-hidden flex flex-col">
-          {user && data && (
-            <>
-              {selectedApp ? (
-                <div className="flex-1 flex flex-col h-full">
-                  {/* Barra superior con información de la app */}
-                  <div className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between shadow-sm">
-                    <div className="flex items-center gap-4">
-                      <button
-                        onClick={() => setSelectedApp(null)}
-                        className="text-slate-600 hover:text-slate-800 flex items-center gap-2 transition-colors"
-                      >
-                        <svg
-                          className="w-5 h-5"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M10 19l-7-7m0 0l7-7m-7 7h18"
-                          />
-                        </svg>
-                        Volver
-                      </button>
-                      <div className="h-6 w-px bg-slate-300" />
-                      <div>
-                        <h2 className="text-lg font-semibold text-slate-800">
-                          {selectedApp.appName}
-                          {selectedApp.description && (
-                            <>
-                              {" | "}
-                              <span className="font-normal text-slate-600">
-                                {selectedApp.description}
-                              </span>
-                            </>
-                          )}
-                        </h2>
-                      </div>
-                    </div>
-                    <span
-                      className={`
-                        px-3
-                        py-1
-                        rounded-full
-                        text-xs
-                        font-semibold
-                        ${
-                          selectedApp.isActive
-                            ? "bg-green-100 text-green-700 border border-green-300"
-                            : "bg-red-100 text-red-700 border border-red-300"
-                        }
-                      `}
-                    >
-                      {selectedApp.isActive ? "Activo" : "Inactivo"}
-                    </span>
-                  </div>
-
-                  {/* Contenedor para la aplicación */}
-                  <div className="flex-1 relative">
-                    {selectedApp.isActive ? (
-                      isRemoteApp && RemoteComponent ? (
-                        // Renderizar remote de Module Federation directamente
-                        <Suspense
-                          fallback={
-                            <div className="flex items-center justify-center h-full bg-slate-50">
-                              <div className="text-center">
-                                <p className="text-slate-600 text-lg">
-                                  Cargando aplicación...
-                                </p>
-                              </div>
-                            </div>
-                          }
-                        >
-                          <div className="w-full h-full overflow-auto">
-                            <ErrorBoundary>
-                              <RemoteComponent />
-                            </ErrorBoundary>
-                          </div>
-                        </Suspense>
-                      ) : (
-                        // Renderizar aplicación externa en iframe
-                        <iframe
-                          src={selectedApp.url || ""}
-                          className="w-full h-full border-0"
-                          title={selectedApp.appName || "Aplicación"}
-                          sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals"
-                        />
-                      )
-                    ) : (
-                      <div className="flex items-center justify-center h-full bg-slate-50">
-                        <div className="text-center">
-                          <p className="text-slate-600 text-lg mb-2">
-                            Esta aplicación está inactiva
-                          </p>
-                          <p className="text-slate-500 text-sm">
-                            No se puede mostrar en este momento
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div className="p-6 overflow-y-auto h-full">
-                  {/* Página de bienvenida por defecto */}
-                  <div className="max-w-4xl mx-auto">
-                    <div className="text-center mb-12">
-                      <h1 className="text-5xl font-bold text-slate-800 mb-4">
-                        Bienvenido a{" "}
-                        <span className="text-slate-700">Host</span>
-                      </h1>
-                      <p className="text-xl text-slate-600 mb-8">
-                        Tu plataforma centralizada para aplicaciones
-                        descentralizadas
-                      </p>
-                    </div>
-
-                    {/* Pitch de ventas */}
-                    <div className="bg-gradient-to-br from-white to-slate-50 rounded-2xl shadow-xl p-8 mb-8 border border-slate-200">
-                      <div className="space-y-6">
-                        <div>
-                          <h2 className="text-2xl font-bold text-slate-800 mb-3">
-                            ¿Qué es Host?
-                          </h2>
-                          <p className="text-slate-600 leading-relaxed">
-                            Host es una plataforma innovadora diseñada para
-                            alojar y gestionar aplicaciones descentralizadas de
-                            manera eficiente y segura. Simplificamos el acceso a
-                            múltiples aplicaciones desde un único punto de
-                            entrada, proporcionando una experiencia de usuario
-                            fluida y unificada.
-                          </p>
-                        </div>
-
-                        <div className="grid md:grid-cols-3 gap-6 mt-8">
-                          <div className="bg-white p-6 rounded-xl shadow-md border border-slate-100">
-                            <div className="w-12 h-12 bg-slate-700 rounded-lg flex items-center justify-center mb-4">
-                              <svg
-                                className="w-6 h-6 text-white"
-                                fill="none"
-                                stroke="currentColor"
-                                viewBox="0 0 24 24"
-                              >
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  strokeWidth={2}
-                                  d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
-                                />
-                              </svg>
-                            </div>
-                            <h3 className="text-lg font-semibold text-slate-800 mb-2">
-                              Seguro y Confiable
-                            </h3>
-                            <p className="text-slate-600 text-sm">
-                              Autenticación robusta y gestión centralizada de
-                              aplicaciones con máxima seguridad.
-                            </p>
-                          </div>
-
-                          <div className="bg-white p-6 rounded-xl shadow-md border border-slate-100">
-                            <div className="w-12 h-12 bg-slate-700 rounded-lg flex items-center justify-center mb-4">
-                              <svg
-                                className="w-6 h-6 text-white"
-                                fill="none"
-                                stroke="currentColor"
-                                viewBox="0 0 24 24"
-                              >
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  strokeWidth={2}
-                                  d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z"
-                                />
-                              </svg>
-                            </div>
-                            <h3 className="text-lg font-semibold text-slate-800 mb-2">
-                              Acceso Unificado
-                            </h3>
-                            <p className="text-slate-600 text-sm">
-                              Todas tus aplicaciones en un solo lugar. Navega
-                              entre ellas sin complicaciones.
-                            </p>
-                          </div>
-
-                          <div className="bg-white p-6 rounded-xl shadow-md border border-slate-100">
-                            <div className="w-12 h-12 bg-slate-700 rounded-lg flex items-center justify-center mb-4">
-                              <svg
-                                className="w-6 h-6 text-white"
-                                fill="none"
-                                stroke="currentColor"
-                                viewBox="0 0 24 24"
-                              >
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  strokeWidth={2}
-                                  d="M13 10V3L4 14h7v7l9-11h-7z"
-                                />
-                              </svg>
-                            </div>
-                            <h3 className="text-lg font-semibold text-slate-800 mb-2">
-                              Rápido y Eficiente
-                            </h3>
-                            <p className="text-slate-600 text-sm">
-                              Carga instantánea de aplicaciones con tecnología
-                              de Module Federation.
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="mt-8 pt-6 border-t border-slate-200">
-                          <h3 className="text-xl font-semibold text-slate-800 mb-3">
-                            ¿Cómo funciona?
-                          </h3>
-                          <ol className="list-decimal list-inside space-y-2 text-slate-600">
-                            <li>
-                              <strong className="text-slate-800">
-                                Explora
-                              </strong>{" "}
-                              las aplicaciones disponibles en el menú lateral
-                            </li>
-                            <li>
-                              <strong className="text-slate-800">
-                                Selecciona
-                              </strong>{" "}
-                              la aplicación que deseas usar
-                            </li>
-                            <li>
-                              <strong className="text-slate-800">
-                                Disfruta
-                              </strong>{" "}
-                              de una experiencia fluida e integrada
-                            </li>
-                          </ol>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Lista de aplicaciones */}
-                    {data && data.length > 0 && (
-                      <div>
-                        <h2 className="text-2xl font-bold text-slate-800 mb-6">
-                          Aplicaciones Disponibles
-                        </h2>
-                        <ul
-                          className="
-                            grid 
-                            grid-cols-1
-                            md:grid-cols-2
-                            lg:grid-cols-3
-                            gap-6
-                          "
-                        >
-                          {data.map((app: Application) => (
-                            <li key={app.id}>
-                              <ApplicationCard application={app} />
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-
-          {!user && !isChecking && !authError && (
+          {user && data ? (
+            selectedApp ? (
+              <AppViewer 
+                app={selectedApp} 
+                onBack={() => setSelectedApp(null)}
+              />
+            ) : (
+              <HomeView 
+                applications={data} 
+                onAppSelect={(app) => {
+                  setSelectedApp(app);
+                  const appUrl = app.url || `/v2/app/${app.id}`;
+                  navigate(appUrl, { replace: true });
+                }}
+              />
+            )
+          ) : !user && !isChecking && !authError ? (
             <div className="flex items-center justify-center h-full">
               <p className="text-slate-600 text-lg">
                 Por favor, inicia sesión para ver las aplicaciones
               </p>
             </div>
-          )}
+          ) : null}
         </main>
       </div>
 

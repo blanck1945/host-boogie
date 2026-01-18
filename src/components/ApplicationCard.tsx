@@ -3,32 +3,32 @@ import type { Application } from "../types/Application";
 
 interface ApplicationCardProps {
   application: Application;
+  onClick?: () => void;
 }
 
-export function ApplicationCard({ application }: ApplicationCardProps) {
-  return (
-    <Link
-      to={application.url}
-      className="
-        group
-        block
-        p-6
-        border-2
-        border-slate-200
-        rounded-xl
-        bg-gradient-to-br
-        from-white
-        to-slate-50
-        shadow-md
-        hover:shadow-xl
-        hover:border-slate-400
-        transition-all
-        duration-300
-        h-full
-        transform
-        hover:-translate-y-1
-      "
-    >
+const cardClassName = `
+  group
+  block
+  p-6
+  border-2
+  border-slate-200
+  rounded-xl
+  bg-gradient-to-br
+  from-white
+  to-slate-50
+  shadow-md
+  hover:shadow-xl
+  hover:border-slate-400
+  transition-all
+  duration-300
+  h-full
+  transform
+  hover:-translate-y-1
+`;
+
+export function ApplicationCard({ application, onClick }: ApplicationCardProps) {
+  const content = (
+    <>
       <div className="flex items-start justify-between mb-4">
         <h3 className="text-xl font-bold text-slate-800 group-hover:text-slate-900 transition-colors">
           {application.appName}
@@ -81,6 +81,23 @@ export function ApplicationCard({ application }: ApplicationCardProps) {
           Ver aplicación →
         </span>
       </div>
+    </>
+  );
+
+  if (onClick) {
+    return (
+      <button
+        onClick={onClick}
+        className={cardClassName + " text-left w-full cursor-pointer"}
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return (
+    <Link to={application.url} className={cardClassName}>
+      {content}
     </Link>
   );
 }
