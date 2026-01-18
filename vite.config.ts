@@ -14,7 +14,7 @@ export default defineConfig({
         remoteApp: "https://remote-atena.vercel.app/assets/remoteEntry.js",
         // remoteApp: "http://localhost:5001/assets/remoteEntry.js",
         remoteReactStreamlit:
-          "https://blizzard-streamlit.vercel.app/assets/remoteEntry.js",
+          "https://boogie-blizzard.vercel.app/assets/remoteEntry.js",
         // remoteReactStreamlit: "http://localhost:5002/assets/remoteEntry.js",
         // "https://boogie-blizzard.vercel.app/assets/remoteEntry.js",
         remoteInformation:
