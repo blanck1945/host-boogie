@@ -4,20 +4,18 @@ import {
   useState,
   Suspense,
   lazy,
-  type ComponentType,
   Component,
   type ReactNode,
   useEffect,
-  useMemo,
 } from "react";
 
-// Pre-importar los componentes remotos para que Vite los reconozca en tiempo de compilación
+// Importar los componentes remotos lazy (enfoque simple como AppV3)
 // @ts-expect-error RemoteApp is not defined
 const RemoteAppLazy = lazy(() => import("remoteApp/App"));
 // @ts-expect-error RemoteReactStreamlit is not defined
 const RemoteReactStreamlitLazy = lazy(() => import("remoteReactStreamlit/routes"));
 // @ts-expect-error RemoteInformation is not defined
-const RemoteInformationLazy = lazy(() => import("remoteInformation/App"));
+const RemoteInformationAppLazy = lazy(() => import("remoteInformation/App"));
 import {
   useNavigate,
   useLocation,
@@ -65,24 +63,6 @@ class ErrorBoundary extends Component<
   }
 }
 
-// Mapeo de remote names a componentes lazy pre-importados
-const remoteComponentMap: Record<string, ComponentType<Record<string, never>>> = {
-  "remoteApp/App": RemoteAppLazy,
-  "remoteReactStreamlit/routes": RemoteReactStreamlitLazy,
-  "remoteInformation/App": RemoteInformationLazy,
-};
-
-// Función helper para obtener el componente lazy pre-importado
-function getRemoteComponent(remoteName: string): ComponentType<Record<string, never>> | undefined {
-  console.log(`[getRemoteComponent] Buscando componente para: ${remoteName}`);
-  const component = remoteComponentMap[remoteName];
-  if (component) {
-    console.log(`[getRemoteComponent] Componente encontrado: ${remoteName}`);
-    return component;
-  }
-  console.warn(`[getRemoteComponent] Componente no encontrado para: ${remoteName}. Componentes disponibles:`, Object.keys(remoteComponentMap));
-  return undefined;
-}
 
 // Mapeo de URLs de aplicación a nombres de remotes de Module Federation
 // Este mapeo se basa en los remotes configurados en vite.config.ts
@@ -121,8 +101,6 @@ function getRemoteNameFromUrl(url: string): { remoteName: string; exportName?: s
   return null;
 }
 
-// Cache de componentes lazy cargados dinámicamente
-const remoteComponentCache = new Map<string, ComponentType<Record<string, never>>>();
 
 
 // Función para extraer iniciales del nombre de la aplicación
@@ -146,75 +124,64 @@ function getAppInitials(appName: string): string {
   }
 }
 
+// Declarar el tipo para la variable global
+declare global {
+  interface Window {
+    __MF_BASENAME__?: string;
+    __MF_HOST__?: boolean;
+  }
+}
+
+// Componente wrapper para establecer basename antes de renderizar (similar a AppV3)
+function RemoteAppWrapper({ children, appUrl }: { children: ReactNode; appUrl: string }) {
+  const location = useLocation();
+  
+  // Establecer basename SÍNCRONAMENTE antes de renderizar (crítico para que funcione)
+  if (typeof window !== 'undefined') {
+    window.__MF_BASENAME__ = appUrl;
+    window.__MF_HOST__ = true;
+    console.log('[RemoteAppWrapper] Basename establecido SÍNCRONAMENTE:', appUrl, 'para ruta:', location.pathname);
+  }
+  
+  // También mantenerlo actualizado con useEffect
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.__MF_BASENAME__ = appUrl;
+      window.__MF_HOST__ = true;
+      console.log('[RemoteAppWrapper] Basename actualizado en useEffect:', appUrl);
+    }
+    
+    return () => {
+      if (typeof window !== 'undefined') {
+        delete window.__MF_BASENAME__;
+        delete window.__MF_HOST__;
+      }
+    };
+  }, [appUrl, location.pathname]);
+
+  return <>{children}</>;
+}
+
 // Componente wrapper para renderizar remotes de MF
 function RemoteAppRenderer({ app }: { app: Application }) {
   const appUrl = app.url || "";
-  const location = useLocation();
-  const navigate = useNavigate();
   
-  console.log('RemoteAppRenderer - appUrl:', appUrl, 'app:', app);
-  console.log('RemoteAppRenderer - current location:', location.pathname);
-  
-  // Interceptar navegaciones de la aplicación remota cuando usa rutas absolutas
-  useEffect(() => {
-    // Lista de rutas conocidas de la aplicación remota (ajustar según sea necesario)
-    const remoteRoutes = ['/stats', '/dashboard', '/settings']; // Agregar más según sea necesario
-    
-    const currentPath = location.pathname;
-    console.log('RemoteAppRenderer - Checking navigation, current path:', currentPath, 'appUrl:', appUrl);
-    
-    // Si la ruta actual es una ruta absoluta que la app remota podría estar usando
-    // y no comienza con appUrl, redirigirla al contexto correcto
-    const isRemoteRoute = remoteRoutes.some(route => 
-      currentPath === route || currentPath === route + '/' || currentPath.startsWith(route + '/')
-    );
-    
-    if (isRemoteRoute && !currentPath.startsWith(appUrl) && currentPath !== '/v2' && !currentPath.startsWith('/v2/')) {
-      const newPath = `${appUrl}${currentPath}`;
-      console.log('RemoteAppRenderer - Interceptando navegación absoluta, redirigiendo a:', newPath);
-      navigate(newPath, { replace: true });
-    }
-  }, [appUrl, navigate, location.pathname]);
+  // Establecer basename SÍNCRONAMENTE antes de cualquier otra cosa
+  // Esto es crítico porque el componente lazy se importa cuando se renderiza
+  if (typeof window !== 'undefined') {
+    window.__MF_BASENAME__ = appUrl;
+    window.__MF_HOST__ = true;
+    console.log('[RemoteAppRenderer] Basename establecido SÍNCRONAMENTE:', appUrl);
+  }
   
   // Verificar si es un remote de Module Federation
   const isRemote = isModuleFederationRemote(appUrl);
-  console.log('RemoteAppRenderer - isModuleFederationRemote:', isRemote);
   
-  // Obtener la configuración del remote desde la URL (siempre calcular, incluso si no es remote)
+  // Obtener la configuración del remote desde la URL
   const remoteConfig = getRemoteNameFromUrl(appUrl);
-  console.log('RemoteAppRenderer - remoteConfig:', remoteConfig);
-  
-  // Obtener el componente lazy pre-importado usando useMemo
-  const RemoteComponent = useMemo(() => {
-    if (!isRemote || !remoteConfig) {
-      return undefined;
-    }
-    
-    const cacheKey = `${remoteConfig.remoteName}:${remoteConfig.exportName || "default"}`;
-    console.log('RemoteAppRenderer - cacheKey:', cacheKey);
-    
-    // Intentar obtener del cache primero
-    let component = remoteComponentCache.get(cacheKey);
-    if (component) {
-      console.log('RemoteAppRenderer - Usando componente del cache:', cacheKey);
-      return component;
-    }
-    
-    // Si no está en el cache, obtener del mapeo de componentes pre-importados
-    component = getRemoteComponent(remoteConfig.remoteName);
-    if (component) {
-      console.log('RemoteAppRenderer - Usando componente pre-importado:', remoteConfig.remoteName);
-      remoteComponentCache.set(cacheKey, component);
-      return component;
-    }
-    
-    console.error('RemoteAppRenderer - No se encontró componente para:', remoteConfig.remoteName);
-    return undefined;
-  }, [isRemote, remoteConfig]);
   
   // Si no es un remote de MF, mostrar en iframe
-  if (!isRemote) {
-    console.log('RemoteAppRenderer - Mostrando en iframe (no es remote MF)');
+  if (!isRemote || !remoteConfig) {
     return (
       <iframe
         src={appUrl}
@@ -225,52 +192,46 @@ function RemoteAppRenderer({ app }: { app: Application }) {
     );
   }
   
-  if (!remoteConfig) {
-    // Fallback a iframe si no se encuentra la configuración
-    console.log('RemoteAppRenderer - Fallback a iframe (no se encontró remoteConfig)');
-    return (
-      <iframe
-        src={appUrl}
-        className="w-full h-full border-0"
-        title={app.appName || "Aplicación"}
-        sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals"
-      />
-    );
-  }
-  
-  if (!RemoteComponent) {
-    console.log('RemoteAppRenderer - No se pudo crear el componente remoto');
-    return (
-      <div className="flex items-center justify-center h-full bg-slate-50">
-        <div className="text-center">
-          <p className="text-slate-600 text-lg">
-            Error: No se pudo cargar la aplicación
-          </p>
-        </div>
-      </div>
-    );
-  }
-  
-  console.log('RemoteAppRenderer - Renderizando componente remoto');
+  // Renderizar el componente remoto correcto según el remoteName
+  const renderRemoteComponent = () => {
+    // Asegurar que el basename esté establecido antes de renderizar
+    if (typeof window !== 'undefined') {
+      window.__MF_BASENAME__ = appUrl;
+      window.__MF_HOST__ = true;
+    }
+    
+    switch (remoteConfig.remoteName) {
+      case "remoteApp/App":
+        return <RemoteAppLazy />;
+      case "remoteReactStreamlit/routes":
+        return <RemoteReactStreamlitLazy />;
+      case "remoteInformation/App":
+        return <RemoteInformationAppLazy />;
+      default:
+        return null;
+    }
+  };
   
   return (
-    <Suspense
-      fallback={
-        <div className="flex items-center justify-center h-full bg-slate-50">
-          <div className="text-center">
-            <p className="text-slate-600 text-lg">
-              Cargando aplicación...
-            </p>
+    <RemoteAppWrapper appUrl={appUrl}>
+      <Suspense
+        fallback={
+          <div className="flex items-center justify-center h-full bg-slate-50">
+            <div className="text-center">
+              <p className="text-slate-600 text-lg">
+                Cargando aplicación...
+              </p>
+            </div>
           </div>
+        }
+      >
+        <div className="w-full h-full overflow-auto">
+          <ErrorBoundary>
+            {renderRemoteComponent()}
+          </ErrorBoundary>
         </div>
-      }
-    >
-      <div className="w-full h-full overflow-auto">
-        <ErrorBoundary>
-          <RemoteComponent />
-        </ErrorBoundary>
-      </div>
-    </Suspense>
+      </Suspense>
+    </RemoteAppWrapper>
   );
 }
 
@@ -639,7 +600,8 @@ function AppV2() {
     
     // Si estamos en /v2, mostrar home
     if (currentPath === '/v2' || currentPath === '/v2/') {
-      setSelectedApp(null);
+      // Usar setTimeout para evitar setState síncrono en effect
+      setTimeout(() => setSelectedApp(null), 0);
       return;
     }
 
@@ -651,7 +613,7 @@ function AppV2() {
       // Intentar buscar por ID numérico o string
       const app = data.find(a => String(a.id) === appIdStr || a.id === parseInt(appIdStr));
       if (app && app.id !== selectedApp?.id) {
-        setSelectedApp(app);
+        setTimeout(() => setSelectedApp(app), 0);
       }
       return;
     }
@@ -694,7 +656,7 @@ function AppV2() {
     }
 
     if (app && app.id !== selectedApp?.id) {
-      setSelectedApp(app);
+      setTimeout(() => setSelectedApp(app), 0);
     } else if (!app && selectedApp && currentPath !== '/v2' && !currentPath.startsWith('/v2/')) {
       // Si no encontramos app pero hay una seleccionada y no estamos en /v2
       // Verificar si la ruta actual es una ruta anidada de la app seleccionada
@@ -705,10 +667,10 @@ function AppV2() {
           selectedAppUrl !== normalizedPath && 
           selectedAppUrl !== currentPath) {
         // Solo limpiar si realmente cambió la ruta y no es una ruta anidada
-        setSelectedApp(null);
+        setTimeout(() => setSelectedApp(null), 0);
       }
     }
-  }, [location.pathname, data]);
+  }, [location.pathname, data, selectedApp]);
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50">

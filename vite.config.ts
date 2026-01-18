@@ -21,7 +21,7 @@ export default defineConfig({
           "https://blizzard-admin.vercel.app/assets/remoteEntry.js",
         // remoteInformation: "http://localhost:5003/assets/remoteEntry.js",
       },
-      shared: ["react", "react-dom", "react-router-dom"],
+      shared: ["react", "react-dom", "react-router", "react-router-dom"],
     }),
   ],
   build: {
