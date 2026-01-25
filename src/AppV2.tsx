@@ -8,6 +8,7 @@ import {
   type ReactNode,
   useEffect,
 } from "react";
+import { envConfig } from "./config";
 
 // Importar los componentes remotos lazy (enfoque simple como AppV3)
 // @ts-expect-error RemoteApp is not defined
@@ -562,9 +563,9 @@ function HomeView({
 function AppV2() {
   // 1) Usamos el SDK
   const { user, isChecking, authError } = useYourIdAuth({
-    applicationBaseUrl: import.meta.env.VITE_APPLICATION_MICROSERVICE_URL,
-    yourIdLoginUrl: import.meta.env.VITE_YOUR_ID_LOGIN_URL,
-    env: import.meta.env.VITE_ENV, // "dev" | "prod"
+    applicationBaseUrl: envConfig.applicationBaseUrl,
+    yourIdLoginUrl: envConfig.yourIdLoginUrl,
+    env: envConfig.env,
   });
 
   // Estados
