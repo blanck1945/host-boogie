@@ -13,11 +13,11 @@ const queryClient = new QueryClient();
 const router = createBrowserRouter([
   {
     path: "/",
-    element: <App />,
+    element: <AppV2 />,
   },
   {
-    path: "/v2",
-    element: <AppV2 />,
+    path: "/v1",
+    element: <App />,
   },
   {
     path: "/atena/*",

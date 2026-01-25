@@ -253,7 +253,7 @@ function AppViewer({
           <button
             onClick={() => {
               onBack?.();
-              navigate("/v2", { replace: true });
+              navigate("/", { replace: true });
             }}
             className="text-slate-600 hover:text-slate-800 flex items-center gap-2 transition-colors"
           >
@@ -598,17 +598,17 @@ function AppV2() {
 
     const currentPath = location.pathname;
     
-    // Si estamos en /v2, mostrar home
-    if (currentPath === '/v2' || currentPath === '/v2/') {
+    // Si estamos en la raíz (/), mostrar home
+    if (currentPath === '/' || currentPath === '') {
       // Usar setTimeout para evitar setState síncrono en effect
       setTimeout(() => setSelectedApp(null), 0);
       return;
     }
 
-    // Buscar aplicación por ID en la ruta /v2/app/:id (fallback para compatibilidad)
+    // Buscar aplicación por ID en la ruta /app/:id (fallback para compatibilidad)
     const pathParts = currentPath.split('/');
     const appIdIndex = pathParts.indexOf('app');
-    if (appIdIndex !== -1 && appIdIndex < pathParts.length - 1 && currentPath.startsWith('/v2/app/')) {
+    if (appIdIndex !== -1 && appIdIndex < pathParts.length - 1 && currentPath.startsWith('/app/')) {
       const appIdStr = pathParts[appIdIndex + 1];
       // Intentar buscar por ID numérico o string
       const app = data.find(a => String(a.id) === appIdStr || a.id === parseInt(appIdStr));
@@ -657,8 +657,8 @@ function AppV2() {
 
     if (app && app.id !== selectedApp?.id) {
       setTimeout(() => setSelectedApp(app), 0);
-    } else if (!app && selectedApp && currentPath !== '/v2' && !currentPath.startsWith('/v2/')) {
-      // Si no encontramos app pero hay una seleccionada y no estamos en /v2
+    } else if (!app && selectedApp && currentPath !== '/' && currentPath !== '') {
+      // Si no encontramos app pero hay una seleccionada y no estamos en la raíz
       // Verificar si la ruta actual es una ruta anidada de la app seleccionada
       const selectedAppUrl = selectedApp.url || '';
       const isNestedRoute = currentPath.startsWith(selectedAppUrl + '/') || currentPath === selectedAppUrl;
@@ -840,7 +840,7 @@ function AppV2() {
                       key={app.id}
                       onClick={() => {
                         setSelectedApp(app);
-                        const appUrl = app.url || `/v2/app/${app.id}`;
+                        const appUrl = app.url || `/app/${app.id}`;
                         navigate(appUrl, { replace: true });
                       }}
                       className={`
@@ -925,7 +925,7 @@ function AppV2() {
                 applications={data} 
                 onAppSelect={(app) => {
                   setSelectedApp(app);
-                  const appUrl = app.url || `/v2/app/${app.id}`;
+                  const appUrl = app.url || `/app/${app.id}`;
                   navigate(appUrl, { replace: true });
                 }}
               />
