@@ -580,7 +580,7 @@ function AppV2() {
     queryKey: ["applications", sortBy],
     enabled: !!user && !authError,
     queryFn: async () => {
-      const url = `${import.meta.env.VITE_APPLICATION_MICROSERVICE_URL}/applications`;
+      const url = `${envConfig.applicationBaseUrl}/applications`;
       console.log('Fetching applications with sortBy:', sortBy, 'from:', url);
       const res = await axios.get(url, {
         headers: getAuthHeaders(),

@@ -4,13 +4,14 @@ import type { Application } from "./types/Application";
 import { ApplicationCard } from "./components/ApplicationCard";
 import { useYourIdAuth } from "./sdk/useYourIDAuth";
 import { getAuthHeaders } from "./sdk/yourid-sdk";
+import { envConfig } from "./config";
 
 function App() {
   // 1) Usamos el SDK
   const { user, isChecking, authError } = useYourIdAuth({
-    applicationBaseUrl: import.meta.env.VITE_APPLICATION_MICROSERVICE_URL,
-    yourIdLoginUrl: import.meta.env.VITE_YOUR_ID_LOGIN_URL,
-    env: import.meta.env.VITE_ENV, // "dev" | "prod"
+    applicationBaseUrl: envConfig.applicationBaseUrl,
+    yourIdLoginUrl: envConfig.yourIdLoginUrl,
+    env: envConfig.env, // "dev" | "prod"
   });
 
   // 2) Cargar aplicaciones SOLO cuando el usuario está autenticado
@@ -19,7 +20,7 @@ function App() {
     enabled: !!user && !authError,
     queryFn: async () => {
       const res = await axios.get(
-        `${import.meta.env.VITE_APPLICATION_MICROSERVICE_URL}/applications`,
+        `${envConfig.applicationBaseUrl}/applications`,
         {
           headers: getAuthHeaders(),
         }
