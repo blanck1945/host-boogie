@@ -9,6 +9,7 @@ import {
   useEffect,
 } from "react";
 import { envConfig } from "./config";
+import packageJson from "../package.json";
 
 // Importar los componentes remotos lazy (enfoque simple como AppV3)
 // @ts-expect-error RemoteApp is not defined
@@ -699,11 +700,11 @@ function AppV2() {
         {/* Sidebar con menú de aplicaciones */}
         <aside
           className={`
-            bg-zinc-700 text-white shadow-lg overflow-y-auto transition-all duration-300 ease-in-out
+            bg-zinc-700 text-white shadow-lg overflow-hidden transition-all duration-300 ease-in-out flex flex-col
             ${isSidebarExpanded ? "w-64" : "w-16"}
           `}
         >
-          <div className="p-4">
+          <div className="flex-1 overflow-y-auto p-4">
             <div className="flex items-center justify-between mb-4">
               {isSidebarExpanded && (
                 <h2 className="text-lg font-semibold text-white">
@@ -910,6 +911,15 @@ function AppV2() {
                 })}
               </nav>
             )}
+          </div>
+          
+          {/* Versión en la parte inferior del sidebar */}
+          <div className="border-t border-zinc-600 p-3 mt-auto">
+            <div className="flex items-center justify-center">
+              <span className="text-xs text-zinc-400 font-mono">
+                {isSidebarExpanded ? `v${packageJson.version}` : `v${packageJson.version}`}
+              </span>
+            </div>
           </div>
         </aside>
 

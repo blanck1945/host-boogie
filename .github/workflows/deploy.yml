@@ -20,5 +20,29 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v4
         with:
+          context: .
           push: true
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/host-boogie:latest
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to EC2 via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            # Ir al directorio principal donde está el docker-compose.yml
+            cd /home/ec2-user
+
+            # Descargar la última imagen de Docker Hub
+            docker compose pull orchestrator
+
+            # Levantar el servicio actualizado (solo el backend)
+            docker compose up -d orchestrator
+
+            # Limpiar imágenes antiguas para ahorrar espacio en la t3.micro
+            docker image prune -f
