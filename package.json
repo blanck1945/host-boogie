@@ -1,7 +1,7 @@
 {
-  "name": "host-dec",
+  "name": "host",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,11 +10,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@module-federation/vite": "^1.9.4",
     "@tailwindcss/vite": "^4.1.17",
     "@tanstack/react-query": "^5.90.12",
     "axios": "^1.13.2",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
     "react-router": "^7.10.1",
     "react-router-dom": "^7.10.1",
     "tailwindcss": "^4.1.17"
