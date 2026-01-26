@@ -1,4 +1,4 @@
-name: Docker Build and Push
+name: Docker Build and Push (Host Frontend)
 
 on:
   push:
@@ -22,7 +22,8 @@ jobs:
         with:
           context: .
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/host-boogie:latest
+          # Forzamos el nombre de la imagen que ya tienes en uso
+          tags: blank1945/host-boogie:latest
 
   deploy:
     runs-on: ubuntu-latest
@@ -35,14 +36,11 @@ jobs:
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            # Ir al directorio principal donde está el docker-compose.yml
+            # Entrar al directorio del proyecto
             cd /home/ec2-user
 
-            # Descargar la última imagen de Docker Hub
-            docker compose pull orchestrator
+            docker compose pull
 
-            # Levantar el servicio actualizado (solo el backend)
-            docker compose up -d orchestrator
+            docker compose up -d
 
-            # Limpiar imágenes antiguas para ahorrar espacio en la t3.micro
             docker image prune -f
